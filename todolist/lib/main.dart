@@ -1,5 +1,8 @@
 
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
 
 void main()
 {
@@ -21,9 +24,19 @@ class MyApp extends StatelessWidget {
 }
 
 class Todo {
+  final String id;
   final String title;
   bool finish;
-  Todo(this.title,{this.finish = false});
+
+  Todo({required this.id, required this.title, this.finish = false});
+
+  factory Todo.fromJson(Map<String, dynamic> j) {
+    return Todo(
+      id: j["id"],
+      title: j["title"],
+      finish: j["finish"] ?? false,
+    );
+  }
 }
 
 class TodoPage extends StatefulWidget {
@@ -34,12 +47,46 @@ class TodoPage extends StatefulWidget {
 }
 
 class _TodoPageState extends State<TodoPage> {
-  final List<Todo> todos = 
-  [
-    Todo("buy a milk"),
-    Todo("eat vegetables"),
-    Todo("take your meal",finish: true)
-  ];
+  final String baseUrl = "http://10.0.2.2:3000"; // Android 模拟器访问电脑
+  List<Todo> todos = [];
+
+  @override
+  void initState() {
+    super.initState();
+    fetchTodos();
+  }
+
+  Future<void> fetchTodos() async {
+    final r = await http.get(Uri.parse("$baseUrl/todos"));
+    final list = jsonDecode(r.body) as List;
+    setState(() {
+      todos = list.map((e) => Todo.fromJson(e)).toList();
+    });
+  }
+
+  Future<void> addTodo(String title) async {
+    await http.post(
+      Uri.parse("$baseUrl/todos"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"title": title}),
+    );
+    await fetchTodos();
+  }
+
+  //如果用户完成了todo，需要更新UI（fetchTodos）， 然后put给后端
+  Future<void> updateTodo(Todo t) async {
+    await http.put(
+      Uri.parse("$baseUrl/todos/${t.id}"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"finish": t.finish}),
+    );
+    await fetchTodos();
+  }
+
+  Future<void> deleteTodo(String id) async {
+    await http.delete(Uri.parse("$baseUrl/todos/$id"));
+    await fetchTodos();
+  }
 
   Future<void> _addTodo() async {
     final text = await showDialog<String>(
@@ -50,28 +97,30 @@ class _TodoPageState extends State<TodoPage> {
     final title = (text ?? "").trim();
     if (title.isEmpty) return;
 
-    setState(() {
-      todos.insert(0, Todo(title));
-    });
+    await addTodo(title);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Center( child: Text('ToDo List')),
+        centerTitle: true,
+        title: const Text('ToDo List'),
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _addTodo, child: const Icon(Icons.add),),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addTodo,
+        child: const Icon(Icons.add),
+      ),
       body: todos.isEmpty
           ? const Center(child: Text("No todos yet"))
           : ListView.separated(
               itemCount: todos.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
+              separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final t = todos[index];
 
                 return Dismissible(
-                  key: ValueKey(t.title),
+                  key: ValueKey(t.id),
                   direction: DismissDirection.endToStart,
                   background: Container(
                     color: Colors.red,
@@ -79,31 +128,31 @@ class _TodoPageState extends State<TodoPage> {
                     padding: const EdgeInsets.only(right: 16),
                     child: const Icon(Icons.delete, color: Colors.white),
                   ),
-                  onDismissed: (_) {
-                    setState(() {
-                      todos.removeAt(index);
-                    });
+                  onDismissed: (_) async {
+                    await deleteTodo(t.id);
                   },
                   child: ListTile(
                     title: Text(
                       t.title,
                       style: TextStyle(
-                        decoration: t.finish
-                            ? TextDecoration.lineThrough
-                            : null,
+                        decoration: t.finish ? TextDecoration.lineThrough : null,
                       ),
                     ),
                     leading: Checkbox(
                       value: t.finish,
-                      onChanged: (v) {
-                        setState(() => t.finish = v ?? false);
+                      onChanged: (v) async {
+                        t.finish = v ?? false;
+                        await updateTodo(t);
                       },
                     ),
-                    onTap: () => setState(() => t.finish = !t.finish),
+                    onTap: () async {
+                      t.finish = !t.finish;
+                      await updateTodo(t);
+                    },
                   ),
                 );
               },
-            ),                 
+            ),
     );
   }
 }
